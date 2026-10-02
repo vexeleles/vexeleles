@@ -113,6 +113,13 @@ def admin_decision_kb(order_id):
         [InlineKeyboardButton(text="❌ Отклонить",        callback_data=f"adm_reject_{order_id}")]
     ])
 
+def admin_balance_order_kb(order_id):
+    """Заказ оплачен с баланса: деньги уже списаны, админ выполняет заказ или отклоняет (деньги вернутся)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Выполнен",                      callback_data=f"adm_done_{order_id}")],
+        [InlineKeyboardButton(text="❌ Отклонить (вернуть на баланс)", callback_data=f"adm_reject_{order_id}")]
+    ])
+
 def topup_decision_kb(topup_id):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Зачислить на баланс", callback_data=f"topup_ok_{topup_id}")],

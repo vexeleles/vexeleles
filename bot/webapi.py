@@ -143,7 +143,7 @@ async def profile(request, user):
         for o in db.get_user_orders(uid)[:50]
     ]
     return web.json_response({
-        "balance_uah": round(ref_balance, 2), "ref_count": ref_count, "ref_earned": round(ref_balance, 2),
+        "balance_uah": round(ref_balance, 2), "ref_count": ref_count, "ref_earned": round(db.get_ref_earned(uid), 2),
         "referral_percent": float(db.get_setting("referral_bonus_percent") or 5),
         "reg_date": (u["reg_date"] or "").split(" ")[0] if u else "",
         "stars_rate": float(db.get_setting("stars_rate")), "discount_percent": discount,
@@ -189,15 +189,19 @@ async def create_order(request, user):
     order_id, order_num = db.create_order(uid, item_type, details, amount, target)
 
     if method == "balance":
-        if not db.debit_balance(uid, amount):
+        # Деньги списываются и заказ уходит «НА_РАССМОТРЕНИИ» одной транзакцией.
+        # Выполняет заказ админ (кнопка «Выполнен» или /accept), при отклонении деньги вернутся.
+        if not db.pay_order_from_balance(uid, order_id, amount):
             db.update_order_status(order_id, "ОТКЛОНЕН")
             return err("Недостаточно средств на балансе")
-        db.update_order_status(order_id, "ВЫПОЛНЕН")
         await D["notify_management"](
-            f"🟢 Оплата с баланса (Mini App)\nЗаказ: {order_num}\nТовар: {item_type} ({details})\n"
-            f"Получатель: {target}\nСумма: {amount} грн → ВЫПОЛНЕН\n"
-            f"Клиент: @{user.get('username')} (ID: {uid})")
-        return web.json_response({"order_num": order_num, "amount_uah": amount, "status": "ВЫПОЛНЕН", "paid": True})
+            f"🟢 Оплата с баланса (Mini App) — нужно выполнить заказ\nЗаказ: {order_num}\n"
+            f"Товар: {item_type} ({details})\nПолучатель: {target}\nСумма: {amount} грн (списано с баланса)\n"
+            f"Статус: НА РАССМОТРЕНИИ\nКлиент: @{user.get('username')} (ID: {uid})",
+            reply_markup=D["admin_balance_kb"](order_id))
+        await D["send_user"](uid, "bal_review", num=order_num)
+        return web.json_response({"order_num": order_num, "amount_uah": amount,
+                                  "status": "НА_РАССМОТРЕНИИ", "paid": False, "on_review": True})
 
     db.update_order_status(order_id, "ОЖИДАНИЕ_ОПЛАТЫ")
     resp = {"order_num": order_num, "amount_uah": amount, "status": "ОЖИДАНИЕ_ОПЛАТЫ"}

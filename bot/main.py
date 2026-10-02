@@ -377,12 +377,13 @@ async def user_profile(message: Message, state: FSMContext):
     )
     await message.answer(text)
 
-def _referral_text(lang, ref_link, ref_count, ref_balance, bonus_percent):
+def _referral_text(lang, ref_link, ref_count, ref_balance, bonus_percent, ref_earned=0.0):
     return (
         f"{loc.t('referral.title', lang)}\n\n"
         f"{loc.t('referral.desc', lang, pct=bonus_percent)}\n\n"
         f"{loc.t('referral.link', lang)}:\n{ref_link}\n\n"
         f"{loc.t('referral.invited', lang)}: {ref_count}\n"
+        f"{loc.t('referral.earned', lang)}: {ref_earned:.2f} грн\n"
         f"{loc.t('referral.balance', lang)}: {ref_balance:.2f} грн\n\n"
         f"{loc.t('referral.usage_hint', lang)}"
     )
@@ -395,7 +396,7 @@ async def referral_program(message: Message, state: FSMContext):
     ref_link = f"https://t.me/{bot_info.username}?start=ref{message.from_user.id}"
     ref_count, ref_balance = db.get_ref_stats(message.from_user.id)
     bonus_percent = db.get_setting("referral_bonus_percent") or "5"
-    text = _referral_text(lang, ref_link, ref_count, ref_balance, bonus_percent)
+    text = _referral_text(lang, ref_link, ref_count, ref_balance, bonus_percent, db.get_ref_earned(message.from_user.id))
     await message.answer(text, reply_markup=kb.referral_kb(ref_balance))
 
 @router.callback_query(F.data == "ref_refresh")
@@ -405,7 +406,7 @@ async def referral_refresh(callback: CallbackQuery):
     bonus_percent = db.get_setting("referral_bonus_percent") or "5"
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref{callback.from_user.id}"
-    text = _referral_text(lang, ref_link, ref_count, ref_balance, bonus_percent)
+    text = _referral_text(lang, ref_link, ref_count, ref_balance, bonus_percent, db.get_ref_earned(callback.from_user.id))
     try:
         await callback.message.edit_text(text, reply_markup=kb.referral_kb(ref_balance))
     except Exception:
@@ -903,6 +904,9 @@ async def cancel_order_user(callback: CallbackQuery):
         return
     if order[5] not in db.OPEN_STATUSES:
         await callback.answer("ℹ️ Заказ уже закрыт.", show_alert=True)
+        return
+    if db.is_paid_from_balance(order_id) and not is_admin(callback.from_user.id):
+        await callback.answer("ℹ️ Заказ оплачен с баланса и уже на рассмотрении — для отмены напишите в поддержку.", show_alert=True)
         return
     db.update_order_status(order_id, "ОТКЛОНЕН")
     await callback.message.answer(loc.t("order.cancelled", lang, order_id=order_id), reply_markup=kb.main_menu(lang))
@@ -1450,11 +1454,32 @@ async def admin_immediate_decision(callback: CallbackQuery):
             await bot.send_message(uid, loc.t("notify.review", user_lang))
         except Exception:
             logger.warning("Второстепенное действие не выполнено (уведомление/сообщение)", exc_info=True)
-    elif action == "reject":
-        db.update_order_status(order_id, "ОТКЛОНЕН")
-        await callback.message.answer(f"Заказ {order[10]} отклонен.")
+    elif action == "done":
+        if order[5] == "ВЫПОЛНЕН":
+            await callback.answer("ℹ️ Заказ уже выполнен.", show_alert=True)
+            return
+        if order[5] == "ОТКЛОНЕН":
+            await callback.answer("ℹ️ Заказ уже отклонён.", show_alert=True)
+            return
+        db.update_order_status(order_id, "ВЫПОЛНЕН")
+        await callback.message.answer(f"✅ Заказ {order[10]} закрыт как выполненный.")
         try:
-            await bot.send_message(uid, loc.t("notify.rejected", user_lang))
+            await bot.send_message(uid, loc.t("notify.completed", user_lang))
+        except Exception:
+            logger.warning("Второстепенное действие не выполнено (уведомление/сообщение)", exc_info=True)
+    elif action == "reject":
+        was_open = order[5] in db.OPEN_STATUSES
+        refunded = was_open and db.is_paid_from_balance(order_id)
+        db.update_order_status(order_id, "ОТКЛОНЕН")
+        if refunded:
+            await callback.message.answer(f"Заказ {order[10]} отклонен, {order[4]} грн возвращены клиенту на баланс.")
+        else:
+            await callback.message.answer(f"Заказ {order[10]} отклонен.")
+        try:
+            if refunded:
+                await send_user(uid, "bal_refund", amount=order[4])
+            else:
+                await bot.send_message(uid, loc.t("notify.rejected", user_lang))
         except Exception:
             logger.warning("Второстепенное действие не выполнено (уведомление/сообщение)", exc_info=True)
     await callback.answer()
@@ -1688,6 +1713,12 @@ USER_MSGS = {
     "topup_no": {"ru": "❌ Пополнение на {amount} грн отклонено. Если вы оплатили — напишите в поддержку.",
                  "ua": "❌ Поповнення на {amount} грн відхилено. Якщо ви оплатили — напишіть у підтримку.",
                  "en": "❌ Your top-up of {amount} UAH was declined. If you paid, please contact support."},
+    "bal_review": {"ru": "🕓 Заказ {num} оплачен с баланса и передан на рассмотрение. Мы сообщим, когда он будет выполнен.",
+                   "ua": "🕓 Замовлення {num} оплачено з балансу й передано на розгляд. Ми повідомимо, коли його буде виконано.",
+                   "en": "🕓 Order {num} was paid from your balance and is now under review. We'll let you know once it's completed."},
+    "bal_refund": {"ru": "↩️ Заказ отклонён, {amount} грн возвращены на ваш баланс.",
+                   "ua": "↩️ Замовлення відхилено, {amount} грн повернуто на ваш баланс.",
+                   "en": "↩️ Your order was rejected; {amount} UAH has been returned to your balance."},
     "wd_ok":    {"ru": "✅ Вывод {amount} грн выполнен.",
                  "ua": "✅ Виведення {amount} грн виконано.",
                  "en": "✅ Your withdrawal of {amount} UAH has been paid."},
@@ -1973,6 +2004,7 @@ async def main():
             "get_stars_discount_percent": get_stars_discount_percent,
             "apply_stars_discount": apply_stars_discount,
             "admin_decision_kb": kb.admin_decision_kb,
+            "admin_balance_kb": kb.admin_balance_order_kb,
             "topup_kb": kb.topup_decision_kb,
             "withdraw_kb": kb.withdraw_decision_kb,
             "send_user": send_user,

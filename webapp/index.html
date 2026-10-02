@@ -662,6 +662,7 @@ const LOC = {
     topup_review_title:"Заявка отправлена", topup_review_text:"Деньги появятся на балансе после проверки. Бот напишет вам, когда это произойдёт.",
     topup_done_title:"Баланс пополнен!", topup_done_text:"Теперь вы можете оплачивать заказы с баланса.", topup_num:"Пополнение №{n}",
     thanks_title_paid:"Оплата прошла успешно!", thanks_title_review:"Чек отправлен на проверку",
+    thanks_title_balance:"Заказ оплачен и на рассмотрении", thanks_text_balance:"Деньги списаны с баланса. Как только админ выполнит заказ, мы напишем вам в боте — статус виден в «Мои заказы».",
     thanks_text_paid:"Благодарим за покупку!\nНапишите, пожалуйста, отзыв в @StarlifyAdmin",
     thanks_text_review:"Спасибо! Проверка обычно занимает до 15 минут — статус будет виден в «Мои заказы».",
     btn_leave_review:"Написать отзыв в @StarlifyAdmin", err_server:"Сервер недоступен, попробуйте позже", pay_not_paid:"Оплата пока не найдена. Оплатите счёт и повторите проверку через несколько секунд.", pay_underpaid:"Оплаченная сумма меньше суммы заказа — напишите в поддержку.", pay_expired:"Счёт истёк — создайте заказ заново.", btn_cancel_order:"Отменить заказ", btn_done:"Готово",
@@ -717,6 +718,7 @@ const LOC = {
     topup_review_title:"Заявку надіслано", topup_review_text:"Гроші з'являться на балансі після перевірки. Бот напише вам, коли це станеться.",
     topup_done_title:"Баланс поповнено!", topup_done_text:"Тепер ви можете оплачувати замовлення з балансу.", topup_num:"Поповнення №{n}",
     thanks_title_paid:"Оплата пройшла успішно!", thanks_title_review:"Чек надіслано на перевірку",
+    thanks_title_balance:"Замовлення оплачено й на розгляді", thanks_text_balance:"Гроші списано з балансу. Щойно адмін виконає замовлення, ми напишемо вам у боті — статус видно в «Мої замовлення».",
     thanks_text_paid:"Дякуємо за покупку!\nНапишіть, будь ласка, відгук у @StarlifyAdmin",
     thanks_text_review:"Дякуємо! Перевірка зазвичай триває до 15 хвилин — статус буде видно в «Мої замовлення».",
     btn_leave_review:"Написати відгук у @StarlifyAdmin", err_server:"Сервер недоступний, спробуйте пізніше", pay_not_paid:"Оплату поки не знайдено. Сплатіть рахунок і повторіть перевірку за кілька секунд.", pay_underpaid:"Сплачена сума менша за суму замовлення — напишіть у підтримку.", pay_expired:"Рахунок прострочено — створіть замовлення заново.", btn_cancel_order:"Скасувати замовлення", btn_done:"Готово",
@@ -772,6 +774,7 @@ const LOC = {
     topup_review_title:"Request sent", topup_review_text:"The money will appear on your balance after review. The bot will message you.",
     topup_done_title:"Balance topped up!", topup_done_text:"You can now pay for orders from your balance.", topup_num:"Top-up #{n}",
     thanks_title_paid:"Payment successful!", thanks_title_review:"Receipt sent for review",
+    thanks_title_balance:"Order paid and under review", thanks_text_balance:"The amount was taken from your balance. We'll message you in the bot once the admin completes the order — the status is in “My orders”.",
     thanks_text_paid:"Thank you for your purchase!\nPlease leave a review at @StarlifyAdmin",
     thanks_text_review:"Thanks! Review usually takes up to 15 minutes — the status will appear in “My orders”.",
     btn_leave_review:"Write a review to @StarlifyAdmin", err_server:"Server unavailable, try again later", pay_not_paid:"Payment not found yet. Pay the invoice and check again in a few seconds.", pay_underpaid:"Paid amount is lower than the order total — contact support.", pay_expired:"Invoice expired — create a new order.", btn_cancel_order:"Cancel order", btn_done:"Done",
@@ -1199,9 +1202,9 @@ async function submitOrder(){
   });
   btn.disabled = false;
   if (!res || res.error){ errBox.textContent = (res && res.error) || t("err_server"); return; }
-  if (res.paid){            // оплата с баланса: заказ сразу оплачен
+  if (res.on_review){       // оплата с баланса: деньги списаны, заказ на рассмотрении у админа
     currentOrder = { num: res.order_num, amount: res.amount_uah, payMethod: "balance", status: res.status };
-    closeAllSheets(); loadRealProfile(); showThanks(currentOrder, "paid"); return;
+    closeAllSheets(); loadRealProfile(); showThanks(currentOrder, "balance"); return;
   }
   const order = { num: res.order_num, amount: res.amount_uah, payMethod: STATE.payMethod, status: res.status, payUrl: res.pay_url, card: res.card };
   currentOrder = order;
@@ -1276,10 +1279,11 @@ function renderPaymentScreen(order){
 
 function showThanks(order, mode, topup){
   const badge = document.getElementById("thanks-badge");
-  badge.classList.toggle("pending", mode==="review");
-  badge.innerHTML = icon(mode==="review" ? "clock" : "check");
-  document.getElementById("thanks-title").textContent = mode==="review" ? t("thanks_title_review") : t("thanks_title_paid");
-  document.getElementById("thanks-text").textContent = mode==="review" ? t("thanks_text_review") : t("thanks_text_paid");
+  const pending = (mode==="review" || mode==="balance");
+  badge.classList.toggle("pending", pending);
+  badge.innerHTML = icon(pending ? "clock" : "check");
+  document.getElementById("thanks-title").textContent = mode==="balance" ? t("thanks_title_balance") : (mode==="review" ? t("thanks_title_review") : t("thanks_title_paid"));
+  document.getElementById("thanks-text").textContent = mode==="balance" ? t("thanks_text_balance") : (mode==="review" ? t("thanks_text_review") : t("thanks_text_paid"));
   document.getElementById("order-num-text").textContent = order.num;
   document.getElementById("btn-leave-review").style.display = topup ? "none" : "";
   document.getElementById("btn-thanks-orders").style.display = topup ? "none" : "";

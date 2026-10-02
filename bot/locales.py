@@ -80,7 +80,7 @@ STRINGS = {
     "profile.orders_count": {"ru": "Успешных заказов", "en": "Successful orders", "ua": "Успішних замовлень"},
     "profile.total_spent": {"ru": "Сумма покупок", "en": "Total spent", "ua": "Сума покупок"},
     "profile.ref_count": {"ru": "Рефералов", "en": "Referrals", "ua": "Рефералів"},
-    "profile.ref_balance": {"ru": "Реферальный баланс", "en": "Referral balance", "ua": "Реферальний баланс"},
+    "profile.ref_balance": {"ru": "Баланс", "en": "Balance", "ua": "Баланс"},
 
     "referral.title": {"ru": "🤝 Реферальная программа", "en": "🤝 Referral Program", "ua": "🤝 Реферальна програма"},
     "referral.desc": {
@@ -90,6 +90,7 @@ STRINGS = {
     },
     "referral.link": {"ru": "🔗 Ваша ссылка", "en": "🔗 Your link", "ua": "🔗 Ваше посилання"},
     "referral.invited": {"ru": "👥 Приглашено", "en": "👥 Invited", "ua": "👥 Запрошено"},
+    "referral.earned": {"ru": "🎁 Заработано с рефералов", "en": "🎁 Earned from referrals", "ua": "🎁 Зароблено з рефералів"},
     "referral.balance": {"ru": "💰 Баланс", "en": "💰 Balance", "ua": "💰 Баланс"},
     "referral.usage_hint": {
         "ru": "Баланс можно использовать в качестве скидки при следующей покупке — просто напишите в поддержку перед оплатой.",

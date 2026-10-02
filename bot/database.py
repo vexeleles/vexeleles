@@ -57,6 +57,7 @@ def init_db():
                 total_spent REAL DEFAULT 0.0,
                 referrer_id INTEGER DEFAULT NULL,
                 ref_balance REAL DEFAULT 0.0,
+                ref_earned REAL DEFAULT 0.0,
                 ref_count INTEGER DEFAULT 0,
                 language TEXT DEFAULT 'ru'
             )
@@ -67,6 +68,7 @@ def init_db():
         migrations = {
             "referrer_id": "INTEGER DEFAULT NULL",
             "ref_balance": "REAL DEFAULT 0.0",
+            "ref_earned": "REAL DEFAULT 0.0",   # только бонусы с рефералов (без пополнений)
             "ref_count": "INTEGER DEFAULT 0",
             "language": "TEXT DEFAULT 'ru'"
         }
@@ -98,6 +100,9 @@ def init_db():
         existing_order_cols = {row[1] for row in cursor.fetchall()}
         if "crypto_invoice_id" not in existing_order_cols:
             cursor.execute("ALTER TABLE orders ADD COLUMN crypto_invoice_id TEXT")
+        # Заказ оплачен с баланса магазина (при отклонении деньги возвращаются на баланс).
+        if "paid_from_balance" not in existing_order_cols:
+            cursor.execute("ALTER TABLE orders ADD COLUMN paid_from_balance INTEGER DEFAULT 0")
 
         # Миграция: добавляем UNIQUE индекс если его нет
         cursor.execute("PRAGMA index_list(orders)")
@@ -220,13 +225,21 @@ def get_referrer(tg_id):
 
 def add_ref_bonus(referrer_id, amount):
     with _connection() as conn:
-        conn.execute("UPDATE users SET ref_balance = ref_balance + ? WHERE tg_id = ?", (amount, referrer_id))
+        conn.execute("UPDATE users SET ref_balance = ref_balance + ?, ref_earned = ref_earned + ? WHERE tg_id = ?",
+                     (amount, amount, referrer_id))
 
 
 def get_ref_stats(tg_id):
     with _connection() as conn:
         res = conn.execute("SELECT ref_count, ref_balance FROM users WHERE tg_id = ?", (tg_id,)).fetchone()
         return tuple(res) if res else (0, 0.0)
+
+
+def get_ref_earned(tg_id) -> float:
+    """Сколько пользователь заработал именно на рефералах (пополнения сюда не входят)."""
+    with _connection() as conn:
+        res = conn.execute("SELECT ref_earned FROM users WHERE tg_id = ?", (tg_id,)).fetchone()
+        return float(res[0] or 0.0) if res else 0.0
 
 
 def spend_ref_balance(tg_id, amount):
@@ -338,6 +351,18 @@ def update_order_status(order_id, status, proof_file_id=None, proof_type=None):
         # при ПЕРВОМ переходе заказа в статус "ВЫПОЛНЕН". Если заказ уже был
         # выполнен и update_order_status вызвали повторно (двойной клик,
         # повторный /accept и т.п.) — бонусы повторно не начисляются.
+        # Возврат денег: заказ, оплаченный с баланса, отклонён/отменён, пока был открыт.
+        # Срабатывает ровно один раз (после первого перехода prev_status уже не «открытый»).
+        if status == 'ОТКЛОНЕН' and prev_status in OPEN_STATUSES:
+            paid = cursor.execute(
+                "SELECT user_id, amount, paid_from_balance FROM orders WHERE id = ?", (order_id,)
+            ).fetchone()
+            if paid and paid[2]:
+                cursor.execute(
+                    "UPDATE users SET ref_balance = ref_balance + ? WHERE tg_id = ?",
+                    (round(float(paid[1]), 2), paid[0])
+                )
+
         if status == 'ВЫПОЛНЕН' and prev_status != 'ВЫПОЛНЕН':
             order = cursor.execute("SELECT user_id, amount FROM orders WHERE id = ?", (order_id,)).fetchone()
             if order:
@@ -357,8 +382,8 @@ def update_order_status(order_id, status, proof_file_id=None, proof_type=None):
                     bonus_percent = float(pct_row[0]) if pct_row else 5.0
                     bonus_amount = round(amt * bonus_percent / 100, 2)
                     cursor.execute(
-                        "UPDATE users SET ref_balance = ref_balance + ? WHERE tg_id = ?",
-                        (bonus_amount, referrer_id)
+                        "UPDATE users SET ref_balance = ref_balance + ?, ref_earned = ref_earned + ? WHERE tg_id = ?",
+                        (bonus_amount, bonus_amount, referrer_id)
                     )
 
 
@@ -369,6 +394,28 @@ ORDER_COLUMNS = (
 # Индексы полей в кортеже заказа (для читаемости в main.py):
 # 0=id 1=user_id 2=item_type 3=details 4=amount 5=status 6=proof_file_id
 # 7=proof_type 8=username_target 9=date 10=order_num 11=crypto_invoice_id
+
+
+def pay_order_from_balance(user_id, order_id, amount) -> bool:
+    """Атомарно: списывает сумму с баланса И переводит заказ в «НА_РАССМОТРЕНИИ».
+    False — если на балансе не хватает денег (тогда ничего не меняется)."""
+    amount = round(float(amount), 2)
+    with _connection() as conn:
+        cur = conn.execute(
+            "UPDATE users SET ref_balance = ref_balance - ? WHERE tg_id = ? AND ref_balance >= ?",
+            (amount, user_id, amount))
+        if cur.rowcount != 1:
+            return False
+        conn.execute(
+            "UPDATE orders SET status = 'НА_РАССМОТРЕНИИ', paid_from_balance = 1 WHERE id = ?",
+            (order_id,))
+        return True
+
+
+def is_paid_from_balance(order_id) -> bool:
+    with _connection() as conn:
+        res = conn.execute("SELECT paid_from_balance FROM orders WHERE id = ?", (order_id,)).fetchone()
+        return bool(res and res[0])
 
 
 def get_order(order_id):
