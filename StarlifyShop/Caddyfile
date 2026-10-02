@@ -1,0 +1,4 @@
+# Замените shop.example.com на ваш домен (A-запись домена должна указывать на IP сервера)
+shop.example.com {
+    reverse_proxy bot:8080
+}

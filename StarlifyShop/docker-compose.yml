@@ -1,0 +1,20 @@
+services:
+  bot:
+    build: .
+    restart: always
+    env_file: ./bot/.env
+    environment:
+      WEBAPI_PORT: "8080"
+    volumes:
+      - botdata:/data            # тут живёт база заказов — не удаляйте volume
+  caddy:
+    image: caddy:2
+    restart: always
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+    depends_on: [bot]
+volumes:
+  botdata:
+  caddy_data:
